@@ -1,0 +1,14 @@
+# Secrets — never commit API keys
+.env
+
+# NCERT content is copyrighted and this repo is public.
+# Share these folders privately within the team; never commit them.
+Knowledgebase/Raw/
+Knowledgebase/Processed/
+Knowledgebase/Index/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

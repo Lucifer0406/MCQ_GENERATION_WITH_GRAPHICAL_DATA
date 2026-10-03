@@ -1,0 +1,18 @@
+# Pinned versions verified to install together on Python 3.14 (2026-10-03).
+# Install: python -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+# Shared
+pydantic==2.13.5
+python-dotenv==1.2.4
+google-genai==2.28.0
+
+# Retrieval (RAG)
+numpy==2.5.3
+faiss-cpu==1.15.1
+pymupdf==1.28.2
+
+# UI
+streamlit==1.65.0
+
+# Tests
+pytest==9.1.1

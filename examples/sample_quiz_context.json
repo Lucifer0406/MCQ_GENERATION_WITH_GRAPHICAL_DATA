@@ -1,0 +1,60 @@
+{
+  "subject": "physics",
+  "difficulty": "medium",
+  "items": [
+    {
+      "subject": "physics",
+      "topic": "Position-time graphs",
+      "chunks": [
+        {
+          "chunk_id": "physics/keph102/2.2/000",
+          "text": "For an object moving with uniform velocity along a straight line, the position-time (x-t) graph is a straight line. The slope of the x-t graph at any instant gives the instantaneous velocity, $v = dx/dt$.",
+          "source": {
+            "document": "NCERT Physics Class XI Part 1",
+            "file": "keph102.pdf",
+            "chapter": "Motion in a Straight Line",
+            "section": "2.2 Instantaneous velocity and speed",
+            "page_start": 2,
+            "page_end": 3
+          },
+          "score": 0.78
+        }
+      ],
+      "sufficient": true,
+      "index_version": "sample"
+    },
+    {
+      "subject": "physics",
+      "topic": "Kinematic equations for uniformly accelerated motion",
+      "chunks": [
+        {
+          "chunk_id": "physics/keph102/2.4/000",
+          "text": "For motion with constant acceleration $a$, initial velocity $u$ and final velocity $v$ after displacement $s$: $v = u + at$, $s = ut + \\frac{1}{2}at^2$ and $v^2 = u^2 + 2as$.",
+          "source": {
+            "document": "NCERT Physics Class XI Part 1",
+            "file": "keph102.pdf",
+            "chapter": "Motion in a Straight Line",
+            "section": "2.4 Kinematic equations for uniformly accelerated motion",
+            "page_start": 7,
+            "page_end": 9
+          },
+          "score": 0.81
+        },
+        {
+          "chunk_id": "physics/keph102/2.4/001",
+          "text": "The equation $v^2 = u^2 + 2as$ is useful when time is not given. A body starting from rest has $u = 0$.",
+          "source": {
+            "document": "NCERT Physics Class XI Part 1",
+            "file": "keph102.pdf",
+            "chapter": "Motion in a Straight Line",
+            "section": "2.4 Kinematic equations for uniformly accelerated motion",
+            "page_start": 8
+          },
+          "score": 0.69
+        }
+      ],
+      "sufficient": true,
+      "index_version": "sample"
+    }
+  ]
+}

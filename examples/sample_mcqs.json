@@ -1,0 +1,79 @@
+[
+  {
+    "subject": "physics",
+    "difficulty": "easy",
+    "topic": "Position-time graphs",
+    "question": "The position-time graph of a car moving along a straight road is shown. What is the velocity of the car?",
+    "options": ["2.5 m/s", "5 m/s", "10 m/s", "20 m/s"],
+    "correct_index": 1,
+    "explanation": "The x-t graph is a straight line, so velocity is its slope: $v = \\Delta x / \\Delta t = (20 - 0)/(4 - 0) = 5$ m/s.",
+    "source_chunk_ids": ["physics/keph102/2.2/000"],
+    "visual": {
+      "type": "data_graph",
+      "chart": "line",
+      "x_label": "t (s)",
+      "y_label": "x (m)",
+      "series": [{"name": "car", "x": [0, 1, 2, 3, 4], "y": [0, 5, 10, 15, 20]}],
+      "caption": "Position-time graph of the car"
+    }
+  },
+  {
+    "subject": "physics",
+    "difficulty": "medium",
+    "topic": "Kinematic equations for uniformly accelerated motion",
+    "question": "A car starts from rest and accelerates uniformly at $2\\,\\text{m/s}^2$. What is its speed after covering $25$ m?",
+    "options": ["5 m/s", "10 m/s", "20 m/s", "50 m/s"],
+    "correct_index": 1,
+    "explanation": "Using $v^2 = u^2 + 2as$ with $u = 0$: $v^2 = 2 \\times 2 \\times 25 = 100$, so $v = 10$ m/s.",
+    "source_chunk_ids": ["physics/keph102/2.4/000", "physics/keph102/2.4/001"],
+    "visual": {"type": "formula", "latex": "v^2 = u^2 + 2as"}
+  },
+  {
+    "subject": "mathematics",
+    "difficulty": "hard",
+    "topic": "Ellipse",
+    "question": "What is the eccentricity of the ellipse shown, $\\frac{x^2}{9} + \\frac{y^2}{4} = 1$?",
+    "options": ["$\\frac{\\sqrt{5}}{3}$", "$\\frac{2}{3}$", "$\\frac{\\sqrt{13}}{3}$", "$\\frac{5}{9}$"],
+    "correct_index": 0,
+    "explanation": "Here $a = 3$, $b = 2$, so $c = \\sqrt{a^2 - b^2} = \\sqrt{5}$ and $e = c/a = \\frac{\\sqrt{5}}{3}$.",
+    "source_chunk_ids": ["mathematics/kemh110/10.6/000"],
+    "visual": {
+      "type": "function_plot",
+      "curves": [{"kind": "parametric", "x_expr": "3*cos(t)", "y_expr": "2*sin(t)", "domain": [0, 6.2832], "label": "ellipse"}],
+      "caption": "x²/9 + y²/4 = 1"
+    }
+  },
+  {
+    "subject": "chemistry",
+    "difficulty": "medium",
+    "topic": "Sigma and pi bonds",
+    "question": "How many sigma ($\\sigma$) and pi ($\\pi$) bonds are present in ethene, shown below?",
+    "options": ["4 σ, 2 π", "5 σ, 1 π", "6 σ, 0 π", "3 σ, 3 π"],
+    "correct_index": 1,
+    "explanation": "Each single bond is one σ bond (4 C–H bonds). The C=C double bond is one σ and one π bond. Total: 5 σ and 1 π.",
+    "source_chunk_ids": ["chemistry/kech104/4.6/000"],
+    "visual": {"type": "chemical_structure", "smiles": "C=C", "name": "ethene"}
+  },
+  {
+    "subject": "chemistry",
+    "difficulty": "hard",
+    "topic": "Bond order",
+    "question": "In molecular orbital theory, $O_2$ has 10 electrons in bonding orbitals and 6 in antibonding orbitals. What is its bond order?",
+    "options": ["1", "1.5", "2", "3"],
+    "correct_index": 2,
+    "explanation": "Bond order $= \\frac{N_b - N_a}{2} = \\frac{10 - 6}{2} = 2$.",
+    "source_chunk_ids": ["chemistry/kech104/4.8/000"],
+    "visual": {"type": "formula", "latex": "\\text{Bond order} = \\frac{N_b - N_a}{2}"}
+  },
+  {
+    "subject": "biology",
+    "difficulty": "easy",
+    "topic": "Five kingdom classification",
+    "question": "Who proposed the five kingdom classification of living organisms?",
+    "options": ["Carolus Linnaeus", "R.H. Whittaker", "Charles Darwin", "Ernst Haeckel"],
+    "correct_index": 1,
+    "explanation": "R.H. Whittaker proposed the five kingdom classification in 1969: Monera, Protista, Fungi, Plantae and Animalia.",
+    "source_chunk_ids": ["biology/kebo102/2.0/000"],
+    "visual": null
+  }
+]
