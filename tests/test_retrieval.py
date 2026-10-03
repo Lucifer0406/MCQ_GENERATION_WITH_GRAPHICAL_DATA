@@ -2,6 +2,7 @@
 so these run without an API key and without NCERT text."""
 
 import json
+from collections import Counter
 import re
 import zlib
 
@@ -142,6 +143,17 @@ def test_quiz_has_one_valid_item_per_question(index_dir):
     quiz = retriever.retrieve_quiz_context("physics", "medium", n_questions=10, seed=1, index_dir=index_dir)
     assert isinstance(quiz, QuizContext) and len(quiz.items) == 10
     assert all(len(item.chunks) == CHUNKS_PER_QUESTION["medium"] for item in quiz.items)
+
+
+@pytest.mark.parametrize("difficulty", ["easy", "medium", "hard"])
+def test_quiz_items_respect_max_per_section(index_dir, difficulty):
+    # The focus chunk counts toward the cap too. The physics fixture's Acceleration section has
+    # 6 chunks, so a focus there with same-section neighbours is exactly the case that broke.
+    quiz = retriever.retrieve_quiz_context("physics", difficulty, n_questions=9, seed=0, index_dir=index_dir)
+    for item in quiz.items:
+        per_section = Counter(c.source.section for c in item.chunks)
+        assert max(per_section.values()) <= MAX_PER_SECTION, (item.topic, per_section)
+        assert len(item.chunks) == CHUNKS_PER_QUESTION[difficulty]   # other sections fill the gap
 
 
 def test_quiz_focus_chunks_are_unique_while_possible(index_dir):

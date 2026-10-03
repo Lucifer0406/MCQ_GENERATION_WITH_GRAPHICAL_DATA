@@ -89,10 +89,20 @@ def _to_chunk(si: SubjectIndex, i: int, score: float) -> ContextChunk:
     )
 
 
-def _search(si: SubjectIndex, query: np.ndarray, k: int, exclude: frozenset[str] | set[str]) -> list[ContextChunk]:
-    """Top-k chunks for a query vector, skipping `exclude`, at most MAX_PER_SECTION per section."""
+def _search(
+    si: SubjectIndex,
+    query: np.ndarray,
+    k: int,
+    exclude: frozenset[str] | set[str],
+    already_per_section: dict[str, int] | None = None,
+) -> list[ContextChunk]:
+    """Top-k chunks for a query vector, skipping `exclude`, at most MAX_PER_SECTION per section.
+
+    already_per_section: chunks the caller has already picked, per section, so they count
+    toward the cap too (the quiz path passes the focus chunk's section here).
+    """
     scores, ids = si.index.search(np.ascontiguousarray(query, dtype=np.float32), min(CANDIDATES, si.index.ntotal))
-    picked, per_section = [], {}
+    picked, per_section = [], dict(already_per_section or {})
     for score, i in zip(scores[0], ids[0]):
         if i < 0:   # FAISS pads with -1 when it has fewer results than asked for
             continue
@@ -132,9 +142,11 @@ def list_topics(subject: str, index_dir: Path = INDEX_DIR) -> list[str]:
 def _seed_context(si: SubjectIndex, subject: str, seed_idx: int, difficulty: str) -> RetrievedContext:
     """Context for one question built around a seed chunk: the seed, then its nearest neighbours."""
     query = si.index.reconstruct(seed_idx)[None, :]   # the seed's own stored vector: no API call
-    seed_id = si.chunks[seed_idx]["chunk_id"]
-    neighbours = _search(si, query, CHUNKS_PER_QUESTION[difficulty], exclude={seed_id})
-    chunks = [_to_chunk(si, seed_idx, 1.0)] + neighbours[: CHUNKS_PER_QUESTION[difficulty] - 1]
+    seed = si.chunks[seed_idx]
+    k = CHUNKS_PER_QUESTION[difficulty]
+    neighbours = _search(si, query, k - 1, exclude={seed["chunk_id"]},
+                         already_per_section={seed["section"]: 1})   # the focus counts toward the cap
+    chunks = [_to_chunk(si, seed_idx, 1.0)] + neighbours
     return RetrievedContext(
         subject=subject,
         topic=si.chunks[seed_idx]["section"].partition(" ")[2],
