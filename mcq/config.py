@@ -20,6 +20,7 @@ ENV_FILE = PROJECT_ROOT / ".env"
 
 # The SDK accepts either name; GOOGLE_API_KEY wins if both are set.
 API_KEY_VARS = ("GOOGLE_API_KEY", "GEMINI_API_KEY")
+GROQ_API_KEY_VARS = ("GROQ_API_KEY",)
 
 
 def get_api_key() -> str:
@@ -33,3 +34,24 @@ def get_api_key() -> str:
         f"No Gemini API key found. Copy .env.example to {ENV_FILE} and set "
         f"GOOGLE_API_KEY (get a key at https://aistudio.google.com/apikey)."
     )
+
+
+def get_groq_api_key() -> str:
+    """Return the Groq API key from the environment or .env, or fail with a clear message."""
+    load_dotenv(ENV_FILE)
+    for var in GROQ_API_KEY_VARS:
+        key = os.environ.get(var, "").strip()
+        if key:
+            return key
+    raise RuntimeError(
+        f"No Groq API key found. Set GROQ_API_KEY in {ENV_FILE} "
+        f"(get a free key at https://console.groq.com/keys)."
+    )
+
+
+def get_default_provider() -> str:
+    """Detect available provider; prefers 'groq' if GROQ_API_KEY is present, else 'gemini'."""
+    load_dotenv(ENV_FILE)
+    if os.environ.get("GROQ_API_KEY", "").strip():
+        return "groq"
+    return "gemini"

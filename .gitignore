@@ -6,6 +6,7 @@
 Knowledgebase/Raw/
 Knowledgebase/Processed/
 Knowledgebase/Index/
+Knowledgebase/
 
 # Python
 .venv/

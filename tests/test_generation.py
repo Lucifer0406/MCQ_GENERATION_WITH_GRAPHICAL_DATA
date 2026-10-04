@@ -376,3 +376,29 @@ class TestGenerateMCQs:
         # 1 item, total_mcqs=3 → per_item = max(2, min(5, ceil(3/1))) = 3
         mcqs = asyncio.run(generate_mcqs(ctx, total_mcqs=3))
         assert len(mcqs) == 3
+
+
+class TestGroqGenerator:
+    def test_groq_provider_selection(self, monkeypatch):
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_test123")
+        gen = MCQGenerator()
+        assert gen.provider == "groq"
+
+    def test_explicit_groq_provider(self, monkeypatch):
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_test123")
+        gen = MCQGenerator(provider="groq")
+        assert gen.provider == "groq"
+
+    def test_groq_generate_for_item_returns_mcqs(self, monkeypatch):
+        monkeypatch.setenv("GROQ_API_KEY", "gsk_test123")
+        gen = MCQGenerator(provider="groq", api_key="gsk_test123")
+        valid_response = _make_batch_json(
+            _make_mcq_dict(question="Q1 from Groq?"),
+            _make_mcq_dict(question="Q2 from Groq?"),
+        )
+        gen._call_groq = AsyncMock(return_value=valid_response)
+        item = RetrievedContext.model_validate(_make_context())
+        mcqs = asyncio.run(gen.generate_for_item(item, "medium", num_mcqs=2))
+        assert len(mcqs) == 2
+        assert mcqs[0].question == "Q1 from Groq?"
+
