@@ -44,6 +44,37 @@ for m in mcqs:
     print(m.question, m.options[m.correct_index], m.visual.type if m.visual else None)
 ```
 
+## Member 2: getting real retrieval output
+
+```python
+from mcq.retrieval.retriever import retrieve_quiz_context, format_context_for_prompt
+
+quiz = retrieve_quiz_context("physics", "medium")          # QuizContext, 10 items, no API call
+for item in quiz.items:
+    focus = item.chunks[0]          # write the question about THIS chunk
+    support = item.chunks[1:]       # related text: use for distractors / harder questions
+    prompt_context = format_context_for_prompt(item)   # optional: chunks as text with [chunk_id: ...] tags
+
+# Next Generate click: vary the questions by avoiding the previous focus chunks
+previous = {item.chunks[0].chunk_id for item in quiz.items}
+quiz2 = retrieve_quiz_context("physics", "medium", avoid_chunk_ids=previous)
+```
+
+- Needs the built index in `Knowledgebase/Index/` (shared privately as a zip; not in git).
+- Difficulty only changes how many chunks each item has (easy 3, medium 4, hard 5); making the
+  *question* easy/medium/hard is the prompt's job.
+- One chapter per subject means topics repeat across 10 questions, but every item has a different focus chunk.
+
+## ⚠️ Gemini free-tier quota (measured 2026-10-03)
+
+**20 generate requests per day, per model, per project** (resets daily, Pacific time). One call per
+MCQ = 2 Generate clicks per model per day. So:
+- Generate **all 10 MCQs in one or two calls** (ask for a JSON list), not one call per MCQ.
+- Use a **fallback chain** of models: individual models also return `503 high demand` at random.
+  Skip a model for the day when its error mentions `PerDay`.
+- Each teammate's own key = own quota. Keep your quota for the demo; don't burn it in loops.
+- Enabling billing on one Google Cloud project removes this limit (costs cents at our scale) — a team decision.
+
 ## Member 2: asking Gemini for an MCQ in our format (tested 2026-10-03)
 
 ```python
@@ -65,7 +96,11 @@ mcq = MCQ.model_validate_json(response.text)   # raises ValidationError if Gemin
 check_citations(mcq, item)                     # the MCQ may only cite chunks it was given
 ```
 
-Tips: ~7 s per call, so generate several MCQs per call (e.g. a list of 5) instead of 10 sequential calls.
+For a list of MCQs in one call, use `TypeAdapter(list[MCQ]).json_schema()` as the schema and
+`TypeAdapter(list[MCQ]).validate_json(response.text)` to parse.
+
+Tips: ~7 s per call for one MCQ. `gemini-3.8-flash` was the first model that worked for us, but check
+which models your key can use today (see quota section above).
 On `ValidationError`, retry once; if a *visual* is the problem, keep the question and set `visual=None`.
 
 ## Member 3: visual types (MVP)
@@ -92,4 +127,6 @@ If a visual fails to render, show the question without it; never crash the page.
 
 ## Change log
 
+- 2026-10-03 — Retrieval available: `retrieve_quiz_context()`. No schema change; documented that
+  `RetrievedContext.chunks[0]` is the question's focus chunk.
 - 2026-10-03 — Initial contracts. Removed `physics_diagram` / `biology_diagram` visual types for the MVP (not needed for our chapters; SVG templates too costly for the deadline).

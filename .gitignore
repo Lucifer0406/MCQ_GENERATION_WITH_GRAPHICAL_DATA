@@ -12,3 +12,6 @@ Knowledgebase/Index/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Private bundle of the built index (contains NCERT text): share privately, never commit
+*.zip

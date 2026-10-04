@@ -1,0 +1,189 @@
+[
+ {
+  "subject": "physics",
+  "query": "how to read velocity from the steepness of a position versus time plot",
+  "expected_sections": [
+   "2.2"
+  ]
+ },
+ {
+  "subject": "physics",
+  "query": "difference between average speed and the magnitude of average velocity",
+  "expected_sections": [
+   "2.2"
+  ]
+ },
+ {
+  "subject": "physics",
+  "query": "how quickly velocity changes over time",
+  "expected_sections": [
+   "2.3"
+  ]
+ },
+ {
+  "subject": "physics",
+  "query": "can an object have zero velocity but non-zero acceleration",
+  "expected_sections": [
+   "2.3"
+  ]
+ },
+ {
+  "subject": "physics",
+  "query": "distance a car travels after the brakes are applied",
+  "expected_sections": [
+   "2.4"
+  ]
+ },
+ {
+  "subject": "physics",
+  "query": "ball thrown straight up and falling back under gravity",
+  "expected_sections": [
+   "2.4"
+  ]
+ },
+ {
+  "subject": "physics",
+  "query": "relation between final velocity, acceleration and displacement without time",
+  "expected_sections": [
+   "2.4"
+  ]
+ },
+ {
+  "subject": "chemistry",
+  "query": "atoms gaining or losing electrons to reach a noble gas configuration",
+  "expected_sections": [
+   "4.1",
+   "4.2"
+  ]
+ },
+ {
+  "subject": "chemistry",
+  "query": "energy needed to break an ionic solid into separate gaseous ions",
+  "expected_sections": [
+   "4.2"
+  ]
+ },
+ {
+  "subject": "chemistry",
+  "query": "predicting the shape of a molecule from repulsion between electron pairs",
+  "expected_sections": [
+   "4.4"
+  ]
+ },
+ {
+  "subject": "chemistry",
+  "query": "mixing atomic orbitals to form equivalent orbitals in methane",
+  "expected_sections": [
+   "4.6"
+  ]
+ },
+ {
+  "subject": "chemistry",
+  "query": "why the oxygen molecule is attracted by a magnet",
+  "expected_sections": [
+   "4.7",
+   "4.8"
+  ]
+ },
+ {
+  "subject": "chemistry",
+  "query": "attraction between a hydrogen atom and a highly electronegative atom of another molecule",
+  "expected_sections": [
+   "4.9"
+  ]
+ },
+ {
+  "subject": "chemistry",
+  "query": "half the difference between bonding and antibonding electrons",
+  "expected_sections": [
+   "4.3",
+   "4.7"
+  ]
+ },
+ {
+  "subject": "mathematics",
+  "query": "curve where every point is the same distance from a fixed centre",
+  "expected_sections": [
+   "10.3"
+  ]
+ },
+ {
+  "subject": "mathematics",
+  "query": "points equidistant from a fixed point and a fixed line",
+  "expected_sections": [
+   "10.4"
+  ]
+ },
+ {
+  "subject": "mathematics",
+  "query": "sum of distances from two fixed points stays constant",
+  "expected_sections": [
+   "10.5"
+  ]
+ },
+ {
+  "subject": "mathematics",
+  "query": "difference of distances from two fixed points stays constant",
+  "expected_sections": [
+   "10.6"
+  ]
+ },
+ {
+  "subject": "mathematics",
+  "query": "chord through the focus perpendicular to the axis",
+  "expected_sections": [
+   "10.4",
+   "10.5",
+   "10.6"
+  ]
+ },
+ {
+  "subject": "mathematics",
+  "query": "cutting a double cone with a plane at different angles",
+  "expected_sections": [
+   "10.2"
+  ]
+ },
+ {
+  "subject": "biology",
+  "query": "bacteria living in extremely salty or hot places",
+  "expected_sections": [
+   "2.1"
+  ]
+ },
+ {
+  "subject": "biology",
+  "query": "single-celled eukaryotes such as diatoms and dinoflagellates",
+  "expected_sections": [
+   "2.2"
+  ]
+ },
+ {
+  "subject": "biology",
+  "query": "organisms with chitin cell walls that feed on dead organic matter",
+  "expected_sections": [
+   "2.3"
+  ]
+ },
+ {
+  "subject": "biology",
+  "query": "multicellular heterotrophs whose cells lack a cell wall",
+  "expected_sections": [
+   "2.5"
+  ]
+ },
+ {
+  "subject": "biology",
+  "query": "infectious agents made only of abnormally folded protein",
+  "expected_sections": [
+   "2.6"
+  ]
+ },
+ {
+  "subject": "biology",
+  "query": "partnership between an alga and a fungus",
+  "expected_sections": [
+   "2.6"
+  ]
+ }
+]
