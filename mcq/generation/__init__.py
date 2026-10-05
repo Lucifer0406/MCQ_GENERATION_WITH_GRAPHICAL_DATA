@@ -58,13 +58,14 @@ async def generate_mcqs(
     context: QuizContext,
     *,
     total_mcqs: int = DEFAULT_TOTAL_MCQS,
+    provider: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
 ) -> list[MCQ]:
     """Generate MCQs for every item in the *context*, concurrently.
 
-    Each :class:`~mcq.schemas.RetrievedContext` item is sent to Gemini in a
-    separate async call, requesting varied question types.  Results are
+    Each :class:`~mcq.schemas.RetrievedContext` item is sent to the LLM in a
+    separate async call, requesting varied question types. Results are
     validated with Pydantic and citation-checked before being returned.
 
     Parameters
@@ -73,21 +74,26 @@ async def generate_mcqs(
         Retrieval output with one or more ``RetrievedContext`` items.
     total_mcqs : int
         Target number of MCQs (distributed evenly across items).
+    provider : str, optional
+        'groq' (default when GROQ_API_KEY is set) or 'gemini'.
     api_key : str, optional
-        Gemini API key.  Defaults to :func:`mcq.config.get_api_key`.
+        API key override for the chosen provider.
     model : str, optional
-        Override the Gemini model (default ``gemini-3.8-flash``).
+        Model override (e.g. 'openai/gpt-oss-120b' for Groq).
 
     Returns
     -------
     list[MCQ]
-        Validated, citation-checked MCQs.  May be fewer than *total_mcqs*
-        if items had insufficient context or validation/citation checks failed.
+        Validated, citation-checked MCQs.
     """
-    resolved_key = api_key or get_api_key()
-    kwargs: dict = {"api_key": resolved_key}
+    kwargs: dict = {}
+    if provider:
+        kwargs["provider"] = provider
+    if api_key:
+        kwargs["api_key"] = api_key
     if model:
         kwargs["model"] = model
+
     generator = MCQGenerator(**kwargs)
 
     # ── Filter eligible items ─────────────────────────────────────────────
@@ -99,30 +105,50 @@ async def generate_mcqs(
         logger.error("No items with sufficient context. Cannot generate MCQs.")
         return []
 
-    # ── Distribute target MCQ count ───────────────────────────────────────
-    per_item = max(MIN_PER_ITEM, min(MAX_PER_ITEM, math.ceil(total_mcqs / len(eligible))))
+    # ── Distribute target MCQ count across diverse topics ─────────────────
+    # Batch ~4-5 MCQs per call (per CONTRACTS.md) to maximize throughput and
+    # stay safely within provider rate limits.
+    num_topics = max(1, min(len(eligible), math.ceil(total_mcqs / 5)))
+    selected_items = eligible[:num_topics]
+    per_item = max(MIN_PER_ITEM, min(MAX_PER_ITEM, math.ceil(total_mcqs / len(selected_items))))
+
     logger.info(
-        "Generating %d MCQ(s) × %d item(s)  (target total: %d).",
-        per_item, len(eligible), total_mcqs,
+        "Generating %d MCQ(s) × %d topic(s) via %s (target total: %d).",
+        per_item, len(selected_items), generator.provider.upper(), total_mcqs,
     )
 
-    # ── Fire all items concurrently ───────────────────────────────────────
-    tasks = [
-        generator.generate_for_item(item, context.difficulty, num_mcqs=per_item)
-        for item in eligible
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    # ── Collect results ───────────────────────────────────────────────────
     all_mcqs: list[MCQ] = []
-    for item, result in zip(eligible, results):
-        if isinstance(result, BaseException):
-            logger.error("Generation failed for topic %r: %s", item.topic, result)
-            continue
-        all_mcqs.extend(result)
+
+    # ── Execution: Paced sequential for Groq TPM safety, gather for Gemini ──
+    if generator.provider == "groq" and len(selected_items) > 1:
+        for i, item in enumerate(selected_items):
+            try:
+                batch = await generator.generate_for_item(item, context.difficulty, num_mcqs=per_item)
+                all_mcqs.extend(batch)
+            except Exception as err:
+                logger.error("Generation failed for topic %r: %s", item.topic, err)
+
+            # 2.0s safe pacing between batches to respect Groq free-tier rolling TPM
+            if i < len(selected_items) - 1:
+                await asyncio.sleep(2.0)
+    else:
+        tasks = [
+            generator.generate_for_item(item, context.difficulty, num_mcqs=per_item)
+            for item in selected_items
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for item, result in zip(selected_items, results):
+            if isinstance(result, BaseException):
+                logger.error("Generation failed for topic %r: %s", item.topic, result)
+                continue
+            all_mcqs.extend(result)
+
+    # Trim to exact requested total if we generated extra
+    if len(all_mcqs) > total_mcqs:
+        all_mcqs = all_mcqs[:total_mcqs]
 
     logger.info(
-        "Generated %d MCQ(s) total across %d topic(s).", len(all_mcqs), len(eligible),
+        "Generated %d MCQ(s) total across %d topic(s).", len(all_mcqs), len(selected_items),
     )
     return all_mcqs
 

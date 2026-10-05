@@ -1,6 +1,6 @@
-"""Gemini client wrapper with structured-output generation, validation, and retry.
+"""Multi-provider client wrapper (Groq & Gemini) with structured output and retries.
 
-This module is internal to ``mcq.generation``.  External callers should use
+This module is internal to ``mcq.generation``. External callers should use
 :func:`mcq.generation.generate_mcqs` instead of touching :class:`MCQGenerator`
 directly.
 """
@@ -10,12 +10,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 
-from google import genai
-from google.genai import types
 from pydantic import BaseModel, Field, ValidationError
 
+from mcq.config import get_api_key, get_default_provider, get_groq_api_key
 from mcq.schemas import MCQ, Difficulty, RetrievedContext, check_citations
 
 from .prompts import SYSTEM_PROMPT, build_prompt
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class _MCQBatch(BaseModel):
-    """Wrapper so Gemini returns ``{"mcqs": [...]}`` instead of a bare array.
+    """Wrapper so LLMs return ``{"mcqs": [...]}`` instead of a bare array.
 
     NOT a :class:`~mcq.schemas.Contract` subclass: it doesn't need
     ``extra="forbid"`` and is never serialised across team boundaries.
@@ -39,9 +39,29 @@ class _MCQBatch(BaseModel):
 _BATCH_SCHEMA: dict[str, Any] = _MCQBatch.model_json_schema()
 
 
-# ── Configuration ────────────────────────────────────────────────────────────
+# ── Provider & Model Configuration ───────────────────────────────────────────
 
-MODEL = "gemini-3.8-flash"
+GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b"
+GROQ_FALLBACK_MODELS: tuple[str, ...] = (
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+)
+
+GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
+GEMINI_FALLBACK_MODELS: tuple[str, ...] = (
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+)
+
+# Backwards-compatible alias for existing tests
+MODEL = GEMINI_DEFAULT_MODEL
+FALLBACK_MODELS = GEMINI_FALLBACK_MODELS
+
 MAX_RETRIES = 2          # up to 2 retries on transient errors or validation issues
 RETRY_DELAY_S = 1.5      # base seconds between retries
 
@@ -50,16 +70,50 @@ RETRY_DELAY_S = 1.5      # base seconds between retries
 
 
 class MCQGenerator:
-    """Async MCQ generator backed by the Gemini API.
+    """Async MCQ generator supporting Groq (primary, ultra-fast) and Gemini.
 
-    Typical usage is through :func:`mcq.generation.generate_mcqs`;  instantiate
-    this class directly only when you need fine-grained control (custom model,
-    per-item calls, etc.).
+    Typical usage is through :func:`mcq.generation.generate_mcqs`.
     """
 
-    def __init__(self, *, api_key: str, model: str = MODEL) -> None:
-        self._model = model
-        self._client = genai.Client(api_key=api_key)
+    def __init__(
+        self,
+        *,
+        provider: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        # Detect provider
+        if provider is not None:
+            self._provider = provider.lower()
+        elif api_key is not None:
+            # If explicit API key passed: Groq keys start with 'gsk_'
+            if api_key.startswith("gsk_"):
+                self._provider = "groq"
+            else:
+                self._provider = "gemini"
+        else:
+            self._provider = get_default_provider()
+
+        self._api_key = api_key
+        self._groq_client = None
+        self._gemini_client = None
+
+        if self._provider == "groq":
+            from groq import AsyncGroq
+
+            resolved_key = self._api_key or get_groq_api_key()
+            self._groq_client = AsyncGroq(api_key=resolved_key)
+            self._model = model or GROQ_DEFAULT_MODEL
+        else:
+            from google import genai
+
+            resolved_key = self._api_key or get_api_key()
+            self._gemini_client = genai.Client(api_key=resolved_key)
+            self._model = model or GEMINI_DEFAULT_MODEL
+
+    @property
+    def provider(self) -> str:
+        return self._provider
 
     # ── Public ───────────────────────────────────────────────────────────
 
@@ -71,14 +125,13 @@ class MCQGenerator:
     ) -> list[MCQ]:
         """Generate *num_mcqs* varied MCQs for a single retrieval item.
 
-        Handles validation errors with up to one retry.  Visual-only errors
+        Handles validation errors with up to two retries. Visual-only errors
         are fixed by stripping the visual; other errors trigger a full retry.
 
         Returns
         -------
         list[MCQ]
-            Validated, citation-checked MCQs.  May be fewer than *num_mcqs*
-            if some fail validation or citation checks.
+            Validated, citation-checked MCQs.
         """
         if not item.sufficient:
             logger.warning(
@@ -95,7 +148,7 @@ class MCQGenerator:
 
         for attempt in range(1 + MAX_RETRIES):
             try:
-                raw_text = await self._call_gemini(prompt)
+                raw_text = await self._call_llm(prompt)
                 mcqs = _validate_batch(raw_text)
                 return _check_all_citations(mcqs, item)
 
@@ -128,7 +181,7 @@ class MCQGenerator:
 
             except Exception as exc:
                 logger.error(
-                    "Gemini API error for %r (attempt %d/%d): %s",
+                    "LLM API error for %r (attempt %d/%d): %s",
                     item.topic, attempt + 1, 1 + MAX_RETRIES, exc,
                 )
                 if attempt < MAX_RETRIES:
@@ -140,16 +193,64 @@ class MCQGenerator:
 
     # ── Private ──────────────────────────────────────────────────────────
 
-    async def _call_gemini(self, prompt: str) -> str:
-        """Single async Gemini call with structured JSON output and 503 fallback."""
+    async def _call_llm(self, prompt: str) -> str:
+        """Route to active provider (Groq or Gemini)."""
+        if self._provider == "groq":
+            return await self._call_groq(prompt)
+        return await self._call_gemini(prompt)
+
+    async def _call_groq(self, prompt: str) -> str:
+        """Single async Groq call with structured JSON schema output and fallback."""
         models_to_try = [self._model]
-        if self._model == "gemini-3.8-flash":
-            models_to_try.append("gemini-3.5-flash")
+        for m in GROQ_FALLBACK_MODELS:
+            if m not in models_to_try:
+                models_to_try.append(m)
 
         last_error: Exception | None = None
         for model_name in models_to_try:
             try:
-                response = await self._client.aio.models.generate_content(
+                resp = await self._groq_client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "mcq_batch",
+                            "schema": _BATCH_SCHEMA,
+                        },
+                    },
+                    max_tokens=3000,
+                    temperature=0.2,
+                )
+                content = resp.choices[0].message.content
+                if not content:
+                    raise RuntimeError("Groq returned an empty response.")
+                return content
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Groq model %s failed (%s), trying fallback…", model_name, exc)
+                continue
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("No Groq model was available to generate content.")
+
+    async def _call_gemini(self, prompt: str) -> str:
+        """Single async Gemini call with structured JSON output and fallback chain."""
+        from google.genai import types
+
+        if self._model in GEMINI_FALLBACK_MODELS:
+            models_to_try = list(GEMINI_FALLBACK_MODELS)
+        else:
+            models_to_try = [self._model] + [m for m in GEMINI_FALLBACK_MODELS if m != self._model]
+
+        last_error: Exception | None = None
+        for model_name in models_to_try:
+            try:
+                response = await self._gemini_client.aio.models.generate_content(
                     model=model_name,
                     contents=prompt,
                     config=types.GenerateContentConfig(
@@ -165,21 +266,21 @@ class MCQGenerator:
                 last_error = exc
                 if "503" in str(exc) or "UNAVAILABLE" in str(exc):
                     logger.warning(
-                        "Model %s unavailable (503). Trying fallback model...", model_name
+                        "Model %s unavailable (503), trying next fallback…", model_name
                     )
                     continue
                 raise exc
 
         if last_error:
             raise last_error
-        raise RuntimeError("No model was available to generate content.")
+        raise RuntimeError("No Gemini model was available to generate content.")
 
 
 # ── Module-level helpers (also used by tests) ────────────────────────────────
 
 
 def _validate_batch(raw_json: str) -> list[MCQ]:
-    """Parse and validate Gemini's JSON response into MCQ objects.
+    """Parse and validate LLM's JSON response into MCQ objects.
 
     Tries the expected ``{"mcqs": [...]}`` wrapper first, then falls back to
     a bare JSON array ``[...]`` in case the model ignores the wrapper.
