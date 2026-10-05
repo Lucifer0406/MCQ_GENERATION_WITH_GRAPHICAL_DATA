@@ -1,4 +1,4 @@
-﻿"""Main Streamlit application — NCERT MCQ Renderer.
+"""Main Streamlit application — NCERT MCQ Renderer.
 
 Run:
     streamlit run app.py
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Literal
@@ -24,22 +25,62 @@ while _CURRENT != _CURRENT.parent:
     _CURRENT = _CURRENT.parent
 
 import streamlit as st
+import streamlit.components.v1 as components
 from pydantic import TypeAdapter
 
 from mcq.schemas import MCQ, SUBJECTS, DIFFICULTIES
 from mcq.rendering.dispatch import render_visual
 from mcq.rendering.katex_renderer import render_katex_text, normalize_latex
 
-# ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(
-    page_title="NCERT MCQ Generator",
-    page_icon=None,
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
+logger = logging.getLogger(__name__)
 
-# ── Global Head & CSS Injection (Loaded ONCE with memory leak guards) ────────
-st.markdown("""
+
+def _inject_katex() -> None:
+    """Dynamically load KaTeX and auto-render math inside HTML cards and options."""
+    components.html("""
+    <script>
+    (function() {
+      var parentDoc = window.parent.document;
+      function renderMath() {
+        if (window.parent.renderMathInElement) {
+          var targets = parentDoc.querySelectorAll('.opt-box, .exp-box, .katex-text-block, .katex-formula-block');
+          targets.forEach(function(el) {
+            window.parent.renderMathInElement(el, {
+              delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+              ],
+              throwOnError: false
+            });
+          });
+        }
+      }
+
+      if (!parentDoc.getElementById('katex-css-dyn')) {
+        var link = parentDoc.createElement('link');
+        link.id = 'katex-css-dyn';
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css';
+        parentDoc.head.appendChild(link);
+
+        var s1 = parentDoc.createElement('script');
+        s1.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js';
+        s1.onload = function() {
+          var s2 = parentDoc.createElement('script');
+          s2.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js';
+          s2.onload = renderMath;
+          parentDoc.head.appendChild(s2);
+        };
+        parentDoc.head.appendChild(s1);
+      } else {
+        setTimeout(renderMath, 150);
+      }
+    })();
+    </script>
+    """, height=0, width=0)
+
+# ── Global Head & CSS Injection ───────────────────────────────────────────────
+_HEAD_HTML = """
 <!-- Fonts & Icons -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -61,14 +102,18 @@ st.markdown("""
 
   window.runKaTeX = function() {
     if (window.renderMathInElement) {
-      window.renderMathInElement(document.body, {
-        delimiters: [
-          {left: '$$', right: '$$', display: true},
-          {left: '$', right: '$', display: false},
-          {left: '\\(', right: '\\)', display: false},
-          {left: '\\[', right: '\\]', display: true}
-        ],
-        throwOnError: false
+      // Scope KaTeX rendering to question containers only — NEVER touch React widgets/popovers
+      var targets = document.querySelectorAll('.katex-text-block, .katex-formula-block, .opt-box, .exp-box');
+      targets.forEach(function(el) {
+        window.renderMathInElement(el, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false},
+            {left: '\\\\(', right: '\\\\)', display: false},
+            {left: '\\\\[', right: '\\\\]', display: true}
+          ],
+          throwOnError: false
+        });
       });
     }
   };
@@ -82,8 +127,9 @@ st.markdown("""
   });
 
   function start() {
-    if (document.body) {
-      observer.observe(document.body, { childList: true, subtree: true });
+    var container = document.querySelector('.main .block-container') || document.body;
+    if (container) {
+      observer.observe(container, { childList: true, subtree: true });
       window.runKaTeX();
     }
   }
@@ -173,15 +219,6 @@ div[data-testid="stSelectbox"] label {
   text-transform: uppercase !important;
   letter-spacing: .06em !important;
   color: var(--label) !important;
-}
-
-div[data-baseweb="select"] > div {
-  background: var(--parchment) !important;
-  border: 1.5px solid var(--border) !important;
-  border-radius: 8px !important;
-  font-family: 'Inter', sans-serif !important;
-  font-size: .92rem !important;
-  color: var(--ink) !important;
 }
 
 /* Generate button */
@@ -304,8 +341,7 @@ div[data-baseweb="select"] > div {
   color: var(--maroon) !important;
 }
 </style>
-""", unsafe_allow_html=True)
-
+"""
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 _OPTION_LETTERS = ["A", "B", "C", "D"]
@@ -352,169 +388,165 @@ def _call_pipeline(subject: str, difficulty: str) -> list[MCQ]:
         if mcqs:
             return mcqs
     except Exception as e:
+        logger.warning("Pipeline error, falling back to sample dataset: %s", e)
         st.info(f"Using standard question dataset ({e}).")
 
     return _load_sample()
 
 
-# ── Session State ─────────────────────────────────────────────────────────────
-if "mcqs" not in st.session_state:
-    st.session_state.mcqs = []
-if "revealed" not in st.session_state:
-    st.session_state.revealed = {}
-
-
-# ── Header ────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="app-header">
-  <div class="app-header-icon"><i class="fa-solid fa-graduation-cap"></i></div>
-  <div>
-    <h1>NCERT MCQ Generator</h1>
-    <p>Physics &middot; Chemistry &middot; Mathematics &middot; Biology &nbsp;&mdash;&nbsp; Class XI &amp; XII</p>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-
-# ── Control Panel ─────────────────────────────────────────────────────────────
-with st.container():
-    col1, col2, col3 = st.columns([2, 2, 1.2], gap="medium")
-
-    with col1:
-        subject = st.selectbox(
-            "Select Subject",
-            options=list(SUBJECTS),
-            format_func=lambda s: s.capitalize(),
-            index=0,
-        )
-
-    with col2:
-        difficulty = st.selectbox(
-            "Select Difficulty",
-            options=list(DIFFICULTIES),
-            format_func=lambda d: d.capitalize(),
-            index=1,
-        )
-
-    with col3:
-        st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
-        generate = st.button(
-            "\u2022  Generate",
-            key="generate_btn",
-            help="Call generation pipeline for questions",
-        )
-
-
-# ── Pipeline Execution ────────────────────────────────────────────────────────
-if generate:
-    with st.spinner("Retrieving context & generating questions..."):
-        st.session_state.mcqs = _call_pipeline(subject, difficulty)
-        st.session_state.revealed = {}
-
-
-# ── Render Questions ──────────────────────────────────────────────────────────
-mcqs: list[MCQ] = st.session_state.mcqs
-with open("output.json", 'w', encoding='utf-8') as f:
-    json.dump(mcqs, f, ensure_ascii=False, indent=2)
-if mcqs:
-    sub_icon = _SUBJECT_ICONS.get(mcqs[0].subject, "fa-solid fa-circle-question")
-    st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 16px">
-      <i class="{sub_icon}" style="color:var(--maroon);font-size:1.1rem"></i>
-      <span style="font-size:.95rem;font-weight:700;color:var(--charcoal)">
-        Generated Questions ({len(mcqs)})
-      </span>
-      <span class="diff-badge">{mcqs[0].subject.capitalize()} &middot; {mcqs[0].difficulty.capitalize()}</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    for idx, mcq in enumerate(mcqs):
-        card_key = f"q_{idx}"
-        revealed = st.session_state.revealed.get(card_key, False)
-
-        with st.container(border=True):
-            # Card Header
-            st.markdown(f"""
-            <div class="card-header-row">
-              <div>
-                <span class="q-title">Question {idx + 1}</span>
-                <span class="q-topic"><i class="fa-regular fa-bookmark"></i> {mcq.topic}</span>
-              </div>
-              <span class="diff-badge">{mcq.difficulty}</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # Question Text (rendered directly without iframe)
-            render_katex_text(mcq.question)
-
-            # Visual Component (if present)
-            if mcq.visual:
-                st.markdown("<div style='margin:10px 0 14px'>", unsafe_allow_html=True)
-                render_visual(mcq.visual)
-                st.markdown("</div>", unsafe_allow_html=True)
-
-            # Options A, B, C, D
-            for opt_idx, opt_text in enumerate(mcq.options):
-                is_correct = (opt_idx == mcq.correct_index)
-                letter = _OPTION_LETTERS[opt_idx]
-
-                if is_correct and revealed:
-                    badge_cls = "opt-badge opt-badge-correct"
-                    box_cls = "opt-box opt-box-correct"
-                    check_mark = '<i class="fa-solid fa-check" style="color:#4a8a4a;margin-left:auto"></i>'
-                else:
-                    badge_cls = "opt-badge"
-                    box_cls = "opt-box"
-                    check_mark = ""
-
-                escaped_opt = normalize_latex(opt_text)
-                st.markdown(f"""
-                <div class="{box_cls}">
-                  <span class="{badge_cls}">{letter}</span>
-                  <span style="flex:1">{escaped_opt}</span>
-                  {check_mark}
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Expander for Correct Answer & Explanation
-            with st.expander("Show Answer & Explanation", expanded=revealed):
-                st.session_state.revealed[card_key] = True
-                correct_letter = _OPTION_LETTERS[mcq.correct_index]
-                correct_text = mcq.options[mcq.correct_index]
-
-                st.markdown(f"""
-                <div class="exp-box">
-                  <div class="exp-title">
-                    <i class="fa-solid fa-circle-check" style="color:#4a8a4a"></i> Correct Answer: {correct_letter}
-                  </div>
-                  <div style="font-family:'EB Garamond',Georgia,serif;font-size:1.05rem;color:var(--ink);margin-bottom:12px">
-                    {normalize_latex(correct_text)}
-                  </div>
-                  <div class="exp-title">
-                    <i class="fa-solid fa-lightbulb"></i> Explanation
-                  </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-                render_katex_text(mcq.explanation)
-
-else:
-    # Empty state
-    st.markdown("""
-    <div style="text-align:center;padding:50px 20px;color:var(--muted)">
-      <i class="fa-solid fa-book-open" style="font-size:2.4rem;color:var(--border);margin-bottom:14px;display:block"></i>
-      <p style="font-size:.95rem;font-weight:600;color:var(--label);margin-bottom:4px">
-        No Questions Loaded
-      </p>
-      <p style="font-size:.82rem">
-        Choose a subject and difficulty level above, then click <strong>Generate</strong>.
-      </p>
-    </div>
-    """, unsafe_allow_html=True)
+# ── Main Entrypoint ───────────────────────────────────────────────────────────
 
 
 def main() -> None:
-    pass
+    """Main Streamlit execution block."""
+    try:
+        st.set_page_config(
+            page_title="NCERT MCQ Generator",
+            page_icon=None,
+            layout="wide",
+            initial_sidebar_state="collapsed",
+        )
+    except Exception:
+        pass  # Page config already set
+
+    st.markdown(_HEAD_HTML, unsafe_allow_html=True)
+
+    # ── Session State ─────────────────────────────────────────────────────────
+    if "mcqs" not in st.session_state:
+        st.session_state.mcqs = []
+    if "revealed" not in st.session_state:
+        st.session_state.revealed = {}
+
+    # ── Header ────────────────────────────────────────────────────────────────
+    st.markdown("""
+    <div class="app-header">
+      <div class="app-header-icon"><i class="fa-solid fa-graduation-cap"></i></div>
+      <div>
+        <h1>NCERT MCQ Generator</h1>
+        <p>Physics &middot; Chemistry &middot; Mathematics &middot; Biology &nbsp;&mdash;&nbsp; Class XI &amp; XII</p>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Control Panel ─────────────────────────────────────────────────────────
+    with st.container():
+        col1, col2, col3 = st.columns([2, 2, 1.2], gap="medium")
+
+        with col1:
+            subject = st.selectbox(
+                "Select Subject",
+                options=list(SUBJECTS),
+                format_func=lambda s: s.capitalize(),
+                index=0,
+                key="select_subject",
+            )
+
+        with col2:
+            difficulty = st.selectbox(
+                "Select Difficulty",
+                options=list(DIFFICULTIES),
+                format_func=lambda d: d.capitalize(),
+                index=1,
+                key="select_difficulty",
+            )
+
+        with col3:
+            st.markdown("<div style='height:25px'></div>", unsafe_allow_html=True)
+            generate = st.button(
+                "•  Generate",
+                key="generate_btn",
+                help="Call generation pipeline for questions",
+            )
+
+    # ── Pipeline Execution ────────────────────────────────────────────────────
+    if generate:
+        with st.spinner("Retrieving context & generating questions..."):
+            st.session_state.mcqs = _call_pipeline(subject, difficulty)
+            st.session_state.revealed = {}
+
+    # ── Render Questions ──────────────────────────────────────────────────────
+    mcqs: list[MCQ] = st.session_state.mcqs
+
+    if mcqs:
+        _inject_katex()
+        try:
+            with open("output.json", "w", encoding="utf-8") as f:
+                f.write(TypeAdapter(list[MCQ]).dump_json(mcqs, indent=2).decode("utf-8"))
+        except Exception as e:
+            logger.debug("output.json write failed: %s", e)
+
+        sub_icon = _SUBJECT_ICONS.get(mcqs[0].subject, "fa-solid fa-circle-question")
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;gap:10px;margin:20px 0 16px">
+          <i class="{sub_icon}" style="color:var(--maroon);font-size:1.1rem"></i>
+          <span style="font-size:.95rem;font-weight:700;color:var(--charcoal)">
+            Generated Questions ({len(mcqs)})
+          </span>
+          <span class="diff-badge">{mcqs[0].subject.capitalize()} &middot; {mcqs[0].difficulty.capitalize()}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        for idx, mcq in enumerate(mcqs):
+            card_key = f"q_{idx}"
+            revealed = st.session_state.revealed.get(card_key, False)
+
+            with st.container(border=True):
+                # Card Header
+                st.markdown(f"""
+                <div class="card-header-row">
+                  <div>
+                    <span class="q-title">Question {idx + 1}</span>
+                    <span class="q-topic"><i class="fa-regular fa-bookmark"></i> {mcq.topic}</span>
+                  </div>
+                  <span class="diff-badge">{mcq.difficulty}</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Question Text
+                render_katex_text(mcq.question)
+
+                # Visual Component (if present)
+                if mcq.visual:
+                    st.markdown("<div style='margin:10px 0 14px'>", unsafe_allow_html=True)
+                    render_visual(mcq.visual)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # Options A, B, C, D
+                for opt_idx, opt_text in enumerate(mcq.options):
+                    is_correct = (opt_idx == mcq.correct_index)
+                    letter = _OPTION_LETTERS[opt_idx]
+                    norm_opt = normalize_latex(opt_text)
+
+                    if is_correct and revealed:
+                        render_katex_text(f"✅ **{letter})** {norm_opt}")
+                    else:
+                        render_katex_text(f"**{letter})** {norm_opt}")
+
+                # Expander for Correct Answer & Explanation
+                with st.expander("Show Answer & Explanation", expanded=revealed):
+                    st.session_state.revealed[card_key] = True
+                    correct_letter = _OPTION_LETTERS[mcq.correct_index]
+                    correct_text = mcq.options[mcq.correct_index]
+
+                    st.markdown(f"**Correct Answer: ({correct_letter})**")
+                    render_katex_text(correct_text)
+                    st.markdown("---")
+                    st.markdown("**Explanation:**")
+                    render_katex_text(mcq.explanation)
+
+    else:
+        # Empty state
+        st.markdown("""
+        <div style="text-align:center;padding:50px 20px;color:var(--muted)">
+          <i class="fa-solid fa-book-open" style="font-size:2.4rem;color:var(--border);margin-bottom:14px;display:block"></i>
+          <p style="font-size:.95rem;font-weight:600;color:var(--label);margin-bottom:4px">
+            No Questions Loaded
+          </p>
+          <p style="font-size:.82rem">
+            Choose a subject and difficulty level above, then click <strong>Generate</strong>.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 if __name__ == "__main__":

@@ -104,7 +104,7 @@ Use [0, 6.2832] for full closed curves (≈ 2π).
 
 Subject-specific guidance:
 • Physics     → prefer data_graph for kinematics/motion, formula for laws and derivations (e.g. v = u + at)
-• Chemistry   → use chemical_structure with valid SMILES for molecules/structures (e.g. C=C, c1ccccc1, H2O), formula for equilibria, kinetics, or bond order
+• Chemistry   → use chemical_structure for molecules/structures (e.g. C=C, c1ccccc1). For VSEPR / molecular geometry questions (e.g. PCl5, SF6, CH4, NH3, H2O, XeF4, BF3, SF4, ClF3, BeCl2), use the formula in smiles (e.g. "PCl5", "SF6") and name; formula for equilibria, kinetics, or bond order
 • Mathematics → use function_plot for curves, conic sections, and areas under curves; formula for calculus & integration questions (e.g. \\int_a^b f(x)\\,dx), derivatives, and identities
 • Biology     → visual is usually null; use formula only if a genetic ratio or numerical equation is central
 

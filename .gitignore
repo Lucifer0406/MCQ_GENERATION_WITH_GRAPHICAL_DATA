@@ -16,3 +16,4 @@ __pycache__/
 
 # Private bundle of the built index (contains NCERT text): share privately, never commit
 *.zip
+output.json
