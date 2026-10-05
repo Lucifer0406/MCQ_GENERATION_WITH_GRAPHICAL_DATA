@@ -175,3 +175,85 @@ def build_prompt(
         f'Generate exactly {num_mcqs} MCQs as specified. '
         f'Return them inside a JSON object: {{"mcqs": [<MCQ>, ...]}}.'
     )
+
+
+def build_multi_item_prompt(
+    items: list[RetrievedContext],
+    difficulty: Difficulty,
+    total_mcqs: int,
+) -> str:
+    """Build user-message prompt across multiple distinct RetrievedContext items.
+
+    Distributes questions evenly across the chapter's topics so that each question
+    tests a different topic in a single fast LLM call.
+    """
+    subject = items[0].subject
+    num_topics = len(items)
+
+    topics_blocks: list[str] = []
+    all_chunk_ids: list[str] = []
+
+    # Distribute questions among items
+    base_per_item = total_mcqs // num_topics
+    remainder = total_mcqs % num_topics
+    allocations = [base_per_item + (1 if i < remainder else 0) for i in range(num_topics)]
+
+    assignments: list[str] = []
+    mcq_counter = 1
+
+    for idx, (item, count) in enumerate(zip(items, allocations)):
+        # For multi-topic batches, use the primary focus chunk (chunk 0) to stay safely within token limits
+        chunks_to_use = item.chunks[:1] if len(items) > 1 else item.chunks
+        chunk_ids = [c.chunk_id for c in chunks_to_use]
+        all_chunk_ids.extend(chunk_ids)
+        available_ids_str = ", ".join(f'"{cid}"' for cid in chunk_ids)
+
+        chunks_text = ""
+        for chunk in chunks_to_use:
+            src = chunk.source
+            location = f"{src.document}, {src.chapter}, {src.section}"
+            if src.page_start is not None:
+                location += f", p. {src.page_start}"
+                if src.page_end is not None:
+                    location += f"–{src.page_end}"
+            chunks_text += (
+                f"--- chunk_id: {chunk.chunk_id} ---\n"
+                f"Source: {location}\n"
+                f"{chunk.text}\n\n"
+            )
+
+        topics_blocks.append(
+            f"=== TOPIC {idx + 1}: {item.topic} ===\n"
+            f"Available Chunk IDs for this topic: [{available_ids_str}]\n"
+            f"Context Chunks:\n{chunks_text}"
+        )
+
+        for _ in range(count):
+            style = QUESTION_STYLES[(mcq_counter - 1) % len(QUESTION_STYLES)]
+            assignments.append(
+                f"  MCQ {mcq_counter} → TOPIC: \"{item.topic}\" | Type: {style['name']} ({style['instruction']})"
+            )
+            mcq_counter += 1
+
+    topics_joined = "\n\n".join(topics_blocks)
+    assignments_joined = "\n".join(assignments)
+    all_ids_joined = ", ".join(f'"{cid}"' for cid in all_chunk_ids)
+
+    return (
+        f"SUBJECT: {subject}\n"
+        f"DIFFICULTY: {difficulty}\n"
+        f"TOTAL MCQs TO GENERATE: {total_mcqs}\n\n"
+        f"TOPIC BREAKDOWN:\n"
+        f"You are given {num_topics} different topics. You MUST generate questions across all of these different topics.\n"
+        f"For each MCQ, you MUST set the \"topic\" field to the EXACT topic name it was generated from.\n\n"
+        f"AVAILABLE CHUNK IDs: [{all_ids_joined}]\n\n"
+        f"TOPIC CONTEXTS & CHUNKS:\n\n"
+        f"{topics_joined}\n\n"
+        f"QUESTION ASSIGNMENTS:\n"
+        f"{assignments_joined}\n\n"
+        f"CRITICAL REQUIREMENTS:\n"
+        f"1. Generate exactly {total_mcqs} MCQs across the topics as assigned above.\n"
+        f"2. Each question's \"topic\" field MUST match the topic of the context chunks it was created from.\n"
+        f"3. Each question's \"source_chunk_ids\" must contain ONLY the chunk_ids belonging to that topic.\n"
+        f'Return all questions inside a single JSON object: {{"mcqs": [<MCQ>, ...]}}.'
+    )

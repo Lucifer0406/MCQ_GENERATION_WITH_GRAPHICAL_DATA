@@ -354,12 +354,17 @@ _SUBJECT_ICONS = {
 }
 
 
-def _load_sample() -> list[MCQ]:
-    """Load sample MCQs fallback from examples json."""
+def _load_sample(subject: str | None = None) -> list[MCQ]:
+    """Load sample MCQs fallback from examples json, filtered by subject if available."""
     sample_path = _CURRENT / "examples" / "sample_mcqs.json"
     if not sample_path.exists():
         sample_path = Path(__file__).resolve().parents[2] / "examples" / "sample_mcqs.json"
-    return TypeAdapter(list[MCQ]).validate_json(sample_path.read_text(encoding="utf-8"))
+    mcqs = TypeAdapter(list[MCQ]).validate_json(sample_path.read_text(encoding="utf-8"))
+    if subject:
+        filtered = [m for m in mcqs if m.subject == subject]
+        if filtered:
+            return filtered
+    return mcqs
 
 
 def _call_pipeline(subject: str, difficulty: str) -> list[MCQ]:
@@ -371,7 +376,7 @@ def _call_pipeline(subject: str, difficulty: str) -> list[MCQ]:
         quiz_context = retrieve_quiz_context(
             subject=subject,
             difficulty=difficulty,
-            n_questions=5,
+            n_questions=10,
         )
 
         try:
@@ -379,11 +384,11 @@ def _call_pipeline(subject: str, difficulty: str) -> list[MCQ]:
             if loop.is_running():
                 import nest_asyncio
                 nest_asyncio.apply()
-                mcqs = loop.run_until_complete(generate_mcqs(quiz_context, total_mcqs=5))
+                mcqs = loop.run_until_complete(generate_mcqs(quiz_context, total_mcqs=10))
             else:
-                mcqs = loop.run_until_complete(generate_mcqs(quiz_context, total_mcqs=5))
+                mcqs = loop.run_until_complete(generate_mcqs(quiz_context, total_mcqs=10))
         except RuntimeError:
-            mcqs = asyncio.run(generate_mcqs(quiz_context, total_mcqs=5))
+            mcqs = asyncio.run(generate_mcqs(quiz_context, total_mcqs=10))
 
         if mcqs:
             return mcqs
@@ -391,7 +396,7 @@ def _call_pipeline(subject: str, difficulty: str) -> list[MCQ]:
         logger.warning("Pipeline error, falling back to sample dataset: %s", e)
         st.info(f"Using standard question dataset ({e}).")
 
-    return _load_sample()
+    return _load_sample(subject)
 
 
 # ── Main Entrypoint ───────────────────────────────────────────────────────────

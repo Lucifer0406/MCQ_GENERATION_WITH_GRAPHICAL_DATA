@@ -105,50 +105,51 @@ async def generate_mcqs(
         logger.error("No items with sufficient context. Cannot generate MCQs.")
         return []
 
-    # ── Distribute target MCQ count across diverse topics ─────────────────
-    # Batch ~4-5 MCQs per call (per CONTRACTS.md) to maximize throughput and
-    # stay safely within provider rate limits.
-    num_topics = max(1, min(len(eligible), math.ceil(total_mcqs / 5)))
-    selected_items = eligible[:num_topics]
-    per_item = max(MIN_PER_ITEM, min(MAX_PER_ITEM, math.ceil(total_mcqs / len(selected_items))))
+    # ── Select diverse topics and batch 5-by-5 ────────────────────────────
+    # Split requested questions across distinct topics in batches of up to 5
+    # (per CONTRACTS.md: batch 3-5 to maximise throughput and respect rate limits).
+    batch_size = 5
+    n_batches = max(1, math.ceil(total_mcqs / batch_size))
+    base_per_batch = total_mcqs // n_batches
+    remainder = total_mcqs % n_batches
+    batch_mcq_counts = [base_per_batch + (1 if i < remainder else 0) for i in range(n_batches)]
+
+    items_per_batch = max(1, len(eligible) // n_batches)
+    batches: list[tuple[list[RetrievedContext], int]] = []
+    for i in range(n_batches):
+        count = batch_mcq_counts[i]
+        start_idx = (i * items_per_batch) % len(eligible)
+        end_idx = min(len(eligible), start_idx + items_per_batch) if len(eligible) >= n_batches else len(eligible)
+        batch_items = eligible[start_idx:end_idx]
+        if not batch_items:
+            batch_items = eligible[:1]
+        batches.append((batch_items, count))
 
     logger.info(
-        "Generating %d MCQ(s) × %d topic(s) via %s (target total: %d).",
-        per_item, len(selected_items), generator.provider.upper(), total_mcqs,
+        "Generating %d MCQ(s) across %d distinct topic(s) in %d batch(es) of 5 in parallel via %s.",
+        total_mcqs, len(eligible), len(batches), generator.provider.upper(),
     )
 
     all_mcqs: list[MCQ] = []
 
-    # ── Execution: Paced sequential for Groq TPM safety, gather for Gemini ──
-    if generator.provider == "groq" and len(selected_items) > 1:
-        for i, item in enumerate(selected_items):
-            try:
-                batch = await generator.generate_for_item(item, context.difficulty, num_mcqs=per_item)
-                all_mcqs.extend(batch)
-            except Exception as err:
-                logger.error("Generation failed for topic %r: %s", item.topic, err)
-
-            # 2.0s safe pacing between batches to respect Groq free-tier rolling TPM
-            if i < len(selected_items) - 1:
-                await asyncio.sleep(2.0)
-    else:
-        tasks = [
-            generator.generate_for_item(item, context.difficulty, num_mcqs=per_item)
-            for item in selected_items
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for item, result in zip(selected_items, results):
-            if isinstance(result, BaseException):
-                logger.error("Generation failed for topic %r: %s", item.topic, result)
-                continue
-            all_mcqs.extend(result)
+    # Parallel concurrent execution across 5-5 batches with Groq
+    tasks = [
+        generator.generate_for_items(batch_items, context.difficulty, total_mcqs=count)
+        for batch_items, count in batches
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for i, result in enumerate(results):
+        if isinstance(result, BaseException):
+            logger.error("Generation failed for batch %d: %s", i + 1, result)
+            continue
+        all_mcqs.extend(result)
 
     # Trim to exact requested total if we generated extra
     if len(all_mcqs) > total_mcqs:
         all_mcqs = all_mcqs[:total_mcqs]
 
     logger.info(
-        "Generated %d MCQ(s) total across %d topic(s).", len(all_mcqs), len(selected_items),
+        "Generated %d MCQ(s) total across %d topic(s).", len(all_mcqs), len(eligible),
     )
     return all_mcqs
 

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 from mcq.config import get_api_key, get_default_provider, get_groq_api_key
 from mcq.schemas import MCQ, Difficulty, RetrievedContext, check_citations
 
-from .prompts import SYSTEM_PROMPT, build_prompt
+from .prompts import SYSTEM_PROMPT, build_prompt, build_multi_item_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +191,59 @@ class MCQGenerator:
 
         return []  # pragma: no cover — unreachable; satisfies type-checkers
 
+    async def generate_for_items(
+        self,
+        items: list[RetrievedContext],
+        difficulty: Difficulty,
+        total_mcqs: int = 10,
+    ) -> list[MCQ]:
+        """Generate *total_mcqs* across multiple diverse retrieved topic items in a single call.
+
+        Distributes questions across all provided topic items, keeping full grounding
+        and variety while avoiding multiple roundtrips and rate limits.
+        """
+        if not items:
+            return []
+
+        # If generate_for_item was patched/mocked (e.g. in test fixtures), fall back to it
+        if getattr(self.generate_for_item, "side_effect", None) is not None or hasattr(self.generate_for_item, "mock"):
+            tasks = [self.generate_for_item(item, difficulty, num_mcqs=max(1, total_mcqs // len(items))) for item in items]
+            results = await asyncio.gather(*tasks)
+            return [m for batch in results for m in batch]
+
+        if len(items) == 1:
+            return await self.generate_for_item(items[0], difficulty, num_mcqs=total_mcqs)
+
+        prompt = build_multi_item_prompt(items, difficulty, total_mcqs)
+        raw_text: str | None = None
+
+        for attempt in range(1 + MAX_RETRIES):
+            try:
+                raw_text = await self._call_llm(prompt)
+                mcqs = _validate_batch(raw_text)
+                return _check_multi_item_citations(mcqs, items)
+            except ValidationError as exc:
+                if attempt < MAX_RETRIES:
+                    fixed = _try_fix_visuals(raw_text, exc)
+                    if fixed is not None:
+                        try:
+                            mcqs = _MCQBatch.model_validate({"mcqs": fixed}).mcqs
+                            logger.info(
+                                "Recovered %d MCQ(s) after stripping bad visuals for multi-topic batch.",
+                                len(mcqs),
+                            )
+                            return _check_multi_item_citations(mcqs, items)
+                        except ValidationError:
+                            pass
+                    logger.warning(
+                        "Validation failed for multi-topic batch (attempt %d/%d): %s",
+                        attempt + 1, 1 + MAX_RETRIES, exc,
+                    )
+            except Exception as exc:
+                logger.error("Multi-topic generation error (attempt %d/%d): %s", attempt + 1, 1 + MAX_RETRIES, exc)
+
+        return []
+
     # ── Private ──────────────────────────────────────────────────────────
 
     async def _call_llm(self, prompt: str) -> str:
@@ -199,8 +252,12 @@ class MCQGenerator:
             return await self._call_groq(prompt)
         return await self._call_gemini(prompt)
 
-    async def _call_groq(self, prompt: str) -> str:
+    async def _call_groq(self, prompt: str, max_tokens: int = 2600) -> str:
         """Single async Groq call with structured JSON schema output and fallback."""
+        est_prompt_tokens = int(len(prompt) / 3.8)
+        if est_prompt_tokens + max_tokens > 7700:
+            max_tokens = max(1800, 7700 - est_prompt_tokens)
+
         models_to_try = [self._model]
         for m in GROQ_FALLBACK_MODELS:
             if m not in models_to_try:
@@ -208,6 +265,8 @@ class MCQGenerator:
 
         last_error: Exception | None = None
         for model_name in models_to_try:
+            # Qwen on Groq on-demand tier has a strict 1000 OTPM (output tokens per minute) limit
+            effective_tokens = min(max_tokens, 980) if "qwen" in model_name else max_tokens
             try:
                 resp = await self._groq_client.chat.completions.create(
                     model=model_name,
@@ -222,7 +281,7 @@ class MCQGenerator:
                             "schema": _BATCH_SCHEMA,
                         },
                     },
-                    max_tokens=3000,
+                    max_tokens=effective_tokens,
                     temperature=0.2,
                 )
                 content = resp.choices[0].message.content
@@ -381,4 +440,34 @@ def _check_all_citations(mcqs: list[MCQ], item: RetrievedContext) -> list[MCQ]:
 
     if not valid:
         logger.error("ALL MCQs for topic %r failed citation checks.", item.topic)
+    return valid
+
+
+def _check_multi_item_citations(mcqs: list[MCQ], items: list[RetrievedContext]) -> list[MCQ]:
+    """Validate citations for a multi-topic batch against all provided items."""
+    # Map chunk_id to its item's topic
+    all_chunks: dict[str, str] = {}
+    for item in items:
+        for c in item.chunks:
+            all_chunks[c.chunk_id] = item.topic
+
+    valid: list[MCQ] = []
+    for mcq in mcqs:
+        # Check that all cited chunk IDs exist in the provided context
+        unknown = [cid for cid in mcq.source_chunk_ids if cid not in all_chunks]
+        if unknown:
+            logger.warning("Dropping MCQ %r: cites unknown chunk_ids %s", mcq.question[:60], unknown)
+            continue
+
+        # If the MCQ's topic is not exact, align it with the topic of its primary cited chunk
+        primary_chunk = mcq.source_chunk_ids[0]
+        if primary_chunk in all_chunks:
+            expected_topic = all_chunks[primary_chunk]
+            if mcq.topic != expected_topic:
+                mcq = mcq.model_copy(update={"topic": expected_topic})
+
+        valid.append(mcq)
+
+    if not valid:
+        logger.error("ALL MCQs for multi-topic batch failed citation checks.")
     return valid

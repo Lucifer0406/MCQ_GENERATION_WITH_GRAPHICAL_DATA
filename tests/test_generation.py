@@ -19,7 +19,7 @@ from mcq.generation.client import (
     _try_fix_visuals,
     _validate_batch,
 )
-from mcq.generation.prompts import QUESTION_STYLES, SYSTEM_PROMPT, build_prompt
+from mcq.generation.prompts import QUESTION_STYLES, SYSTEM_PROMPT, build_prompt, build_multi_item_prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -130,6 +130,18 @@ class TestPrompts:
         prompt = build_prompt(item, "easy", 1)
         assert "5" in prompt  # page_start
         assert "7" in prompt  # page_end
+
+    def test_build_multi_item_prompt_contains_all_topics(self):
+        items = [
+            RetrievedContext.model_validate(_make_context(topic="Topic Alpha")),
+            RetrievedContext.model_validate(_make_context(topic="Topic Beta")),
+            RetrievedContext.model_validate(_make_context(topic="Topic Gamma")),
+        ]
+        prompt = build_multi_item_prompt(items, "medium", 3)
+        assert "Topic Alpha" in prompt
+        assert "Topic Beta" in prompt
+        assert "Topic Gamma" in prompt
+        assert "TOTAL MCQs TO GENERATE: 3" in prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
