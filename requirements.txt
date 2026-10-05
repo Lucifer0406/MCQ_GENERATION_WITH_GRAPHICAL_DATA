@@ -14,6 +14,7 @@ pymupdf==1.28.2
 
 # UI
 streamlit==1.65.0
+plotly>=5.22.0
 
 # Tests
 pytest==9.1.1
